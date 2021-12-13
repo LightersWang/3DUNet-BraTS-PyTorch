@@ -33,7 +33,7 @@ def train(epoch, args, model, train_loader, loss, optimizer):
     total_loss_meter = AverageMeter()
 
     end = time.time()
-    for iter, (image, label, brats_id) in enumerate(train_loader):
+    for iter, (image, label, _, _) in enumerate(train_loader):
         # init
         bce_loss = torch.tensor(0.).cuda()
         dsc_loss = torch.tensor(0.).cuda()
@@ -107,7 +107,7 @@ def val(args, model:nn.Module, val_loader):
 
     with torch.no_grad():
         end = time.time()
-        for iter, (image, label, brats_id) in enumerate(val_loader):
+        for iter, (image, label, _, _) in enumerate(val_loader):
             image, label = image.cuda(), label.float().cuda()
             bsz = image.size(0)
 

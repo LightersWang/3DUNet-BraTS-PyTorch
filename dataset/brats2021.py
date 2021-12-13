@@ -66,7 +66,7 @@ class BraTS2021Dataset(data.Dataset):
         else:
             raise NotImplementedError(self.split)
 
-        return item['image'], item['label'], name
+        return item['image'], item['label'], index, name
 
     def __len__(self):
         return len(self.case_names)

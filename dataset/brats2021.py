@@ -111,7 +111,7 @@ if __name__ == "__main__":
     print(len(case_names), '\n', case_names[:10])
 
     # train loader 
-    train_loader = get_brats2021_val_loader(args, case_names)
+    train_loader = get_brats2021_train_loader(args, case_names)
     print(len(train_loader))
     item = next(iter(train_loader))
     
@@ -120,46 +120,46 @@ if __name__ == "__main__":
     # print(len(val_loader))
     # item = next(iter(val_loader))
 
-    print(item[-1])
-    for i in range(len(item) - 1):
-        print(item[i].shape)
+    # print(item[-1])
+    # for i in range(len(item) - 1):
+    #     print(item[i].shape)
 
-    # import matplotlib
-    # print(matplotlib.get_backend())    
-    import matplotlib.pyplot as plt
+    # # import matplotlib
+    # # print(matplotlib.get_backend())    
+    # import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(5, 3)
+    # fig, axes = plt.subplots(5, 3)
 
-    t1ce = item[0][0, 2].squeeze().cpu().numpy()
-    axes[0, 0].imshow(t1ce[t1ce.shape[0] // 2].T, cmap='gray')
-    axes[0, 1].imshow(t1ce[:, t1ce.shape[1] // 2].T, cmap='gray')
-    axes[0, 2].imshow(t1ce[..., t1ce.shape[2] // 2].T, cmap='gray')
+    # t1ce = item[0][0, 2].squeeze().cpu().numpy()
+    # axes[0, 0].imshow(t1ce[t1ce.shape[0] // 2].T, cmap='gray')
+    # axes[0, 1].imshow(t1ce[:, t1ce.shape[1] // 2].T, cmap='gray')
+    # axes[0, 2].imshow(t1ce[..., t1ce.shape[2] // 2].T, cmap='gray')
 
-    flair = item[0][0, 0].squeeze().cpu().numpy()
-    axes[1, 0].imshow(flair[flair.shape[0] // 2].T, cmap='gray')
-    axes[1, 1].imshow(flair[:, flair.shape[1] // 2].T, cmap='gray')
-    axes[1, 2].imshow(flair[..., flair.shape[2] // 2].T, cmap='gray')
+    # flair = item[0][0, 0].squeeze().cpu().numpy()
+    # axes[1, 0].imshow(flair[flair.shape[0] // 2].T, cmap='gray')
+    # axes[1, 1].imshow(flair[:, flair.shape[1] // 2].T, cmap='gray')
+    # axes[1, 2].imshow(flair[..., flair.shape[2] // 2].T, cmap='gray')
 
-    label1 = item[-2][0, 0].squeeze().cpu().numpy()
-    axes[2, 0].imshow(label1[t1ce.shape[0] // 2].T)
-    axes[2, 1].imshow(label1[:, t1ce.shape[1] // 2].T)
-    axes[2, 2].imshow(label1[..., t1ce.shape[2] // 2].T)
+    # label1 = item[-2][0, 0].squeeze().cpu().numpy()
+    # axes[2, 0].imshow(label1[t1ce.shape[0] // 2].T)
+    # axes[2, 1].imshow(label1[:, t1ce.shape[1] // 2].T)
+    # axes[2, 2].imshow(label1[..., t1ce.shape[2] // 2].T)
 
-    label2 = item[-2][0, 1].squeeze().cpu().numpy()
-    axes[3, 0].imshow(label2[t1ce.shape[0] // 2].T)
-    axes[3, 1].imshow(label2[:, t1ce.shape[1] // 2].T)
-    axes[3, 2].imshow(label2[..., t1ce.shape[2] // 2].T)
+    # label2 = item[-2][0, 1].squeeze().cpu().numpy()
+    # axes[3, 0].imshow(label2[t1ce.shape[0] // 2].T)
+    # axes[3, 1].imshow(label2[:, t1ce.shape[1] // 2].T)
+    # axes[3, 2].imshow(label2[..., t1ce.shape[2] // 2].T)
 
-    label3 = item[-2][0, 2].squeeze().cpu().numpy()
-    axes[4, 0].imshow(label3[t1ce.shape[0] // 2].T)
-    axes[4, 1].imshow(label3[:, t1ce.shape[1] // 2].T)
-    axes[4, 2].imshow(label3[..., t1ce.shape[2] // 2].T)
-    plt.show()
+    # label3 = item[-2][0, 2].squeeze().cpu().numpy()
+    # axes[4, 0].imshow(label3[t1ce.shape[0] // 2].T)
+    # axes[4, 1].imshow(label3[:, t1ce.shape[1] // 2].T)
+    # axes[4, 2].imshow(label3[..., t1ce.shape[2] // 2].T)
+    # plt.show()
 
-    # check shape
-    from dataset.augment import get_brats2021_base_transform
-    import monai.transforms as transforms
-    train_dataset = BraTS2021Dataset(
-        args.data_root, 'train', case_names, get_brats2021_train_transform())
-    img = train_dataset[0]
-    print(img)
+    # # check shape
+    # from dataset.augment import get_brats2021_base_transform
+    # import monai.transforms as transforms
+    # train_dataset = BraTS2021Dataset(
+    #     args.data_root, 'train', case_names, get_brats2021_train_transform())
+    # img = train_dataset[0]
+    # print(img)

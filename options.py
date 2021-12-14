@@ -86,7 +86,7 @@ def save_args(args, save_dir):
         fd.write(str(args).replace(', ', ',\n'))
 
 
-def prepare_args():
+def prepare_train_args():
     args = parse_args()
     get_save_path(args)
     save_args(args, args.save_path)
@@ -94,5 +94,5 @@ def prepare_args():
 
 
 if __name__ == '__main__':
-    train_args = prepare_args()
+    train_args = prepare_train_args()
     print(train_args)

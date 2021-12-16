@@ -46,7 +46,7 @@ class CaseSegMetricMeter(object):
 
     def output(self, epoch, save_epoch_path):
         df = pd.DataFrame(self.cases).T
-        df.columns = ['Dice_WT', 'Dice_TC', 'Dice_ET', 
+        df.columns = ['Dice_WT', 'Dice_TC', 'Dice_ET',
                       'HD95_WT', 'HD95_TC', 'HD95_ET']
         df.to_csv(join(save_epoch_path, f"val_metric_epoch{epoch}.csv"))
 
@@ -65,7 +65,9 @@ def nib_affine(path):
 
 
 def save_nifti(seg_map:torch.Tensor, names:list, save_epoch_path:str, args):
-    """output val seg map in every iteration to save VRAM"""
+    """
+    Output val seg map in every iteration to save VRAM
+    """
     seg_map_numpy = seg_map.cpu().numpy()
     B, _, H, W, D = seg_map_numpy.shape
 

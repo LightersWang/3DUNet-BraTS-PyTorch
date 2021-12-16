@@ -1,6 +1,7 @@
+from copy import deepcopy
 import os
 import time
-import argparse
+import pickle
 from argparse import ArgumentParser
 
 
@@ -9,8 +10,12 @@ def parse_args():
     parser.add_argument('--gpus', nargs='+', type=int)
     parser.add_argument('--seed', type=int, default=1234)
     parser.add_argument('--num_workers', type=int, default=6, help='number of workers to load data')
-    parser.add_argument('--save_prefix', type=str, default='pref', help='some comment for model or test result dir')
-    parser.add_argument('--load_model_path', type=str, default='', help='model path for pretrain or test')
+    # parser.add_argument('--save_prefix', type=str, default='pref', help='some comment for model or test result dir')
+
+    # checkpoint
+    parser.add_argument('--load_path', type=str, default='', help='model folder path for pretrain or test')
+    parser.add_argument('--load_checkpoint', default=False, help='if load from checkpoint then change later')
+    parser.add_argument('--load_model_path', default='', help='if load from checkpoint then change later')
 
     # data
     parser.add_argument('--data_type', type=str, default='brats2021', choices=['brats2021'], help='dataset hint')
@@ -61,7 +66,7 @@ def parse_args():
     parser.add_argument('--warmup_epochs', type=int, default=5, help='warm up epochs')
     parser.add_argument('--milestones', type=list, default=[60, 80], help='milestones for multistep decay')
     parser.add_argument('--lr_gamma', type=float, default=0.1, help='decay factor for multistep decay')
-
+    
     args = parser.parse_args()
     return args
 
@@ -70,8 +75,8 @@ def get_save_path(args):
     # time as folder name
     str_time = time.strftime("%m%d_%H%M%S", time.localtime())
     save_folder_name = "_".join([str_time, args.data_type, args.model_type])
-    save_folder_name = "{}_batchsize{}_epochs{}_lr{}".format(
-        save_folder_name, args.train_batch_size, args.epochs, args.lr)
+    save_folder_name = "{}_batchsize{}_epochs{}_{}_lr{}".format(
+        save_folder_name, args.train_batch_size, args.epochs, args.optim, args.lr)
 
     # mkdir savepath
     save_path = os.path.join(args.save_root, save_folder_name)
@@ -80,16 +85,40 @@ def get_save_path(args):
     args.save_path = save_path
 
 
-def save_args(args, save_dir):
-    args_path = os.path.join(save_dir, 'args.txt')
-    with open(args_path, 'w') as fd:
-        fd.write(str(args).replace(', ', ',\n'))
+def save_args(args):
+    # save args as txt file & pickle file
+    args_path = os.path.join(args.save_path, 'args')
+    with open(args_path+'.txt', 'w') as f:
+        f.write(str(args).replace(', ', ',\n'))     # write as txt file
+    with open(args_path+'.pickle', 'wb') as f:
+        pickle.dump(args, f)        # write as pickle file
+
+
+def load_checkpoint_args(args):
+    """
+    If training resume from a checkpoint, then use previous args
+
+    Example args.load_path: data/experiments/1216_104930_xxx/epoch_x
+    """
+    load_path = args.load_path      # old args load path is empty or out-of-date, so save it for now
+    ckp_args_path = os.path.join(os.path.dirname(load_path), 'args.pickle')
+    with open(ckp_args_path, 'rb') as f:
+        loaded_args = f.load(f)
+
+    args = deepcopy(loaded_args)
+    args.load_path = load_path
+    args.load_checkpoint = True
+    epoch = int(args.load_path.split("_")[-1])
+    args.load_model_path = os.path.join(args.load_path, f"checkpoint_{epoch:02d}.pth")
 
 
 def prepare_train_args():
     args = parse_args()
-    get_save_path(args)
-    save_args(args, args.save_path)
+    if args.load_path != '':
+        load_checkpoint_args(args)
+    else:
+        get_save_path(args)
+        save_args(args)
     return args
 
 

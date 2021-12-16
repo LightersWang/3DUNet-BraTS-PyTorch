@@ -22,14 +22,14 @@ def get_multi_encoder_plain_unet(args):
     }
     
     unet = MultiEncoderPlainUNet(
+        layer_args                = layer_args,
         num_encoder               = args.num_modality,
         input_channels            = args.input_channels,
         num_classes               = args.num_classes,
         num_downsample            = args.num_downsample,
         num_blocks_per_stage      = args.blocks_per_stage,
-        layer_args                = layer_args,
         deep_supervision          = args.deep_supervision,
-        encoder_base_num_features = 32 // args.num_modality  # 32 // 4
+        encoder_base_num_features = 32 // args.num_modality,  # 32 // 4
     )
 
     return unet
@@ -44,25 +44,26 @@ def get_single_encoder_plain_unet(args):
     }
     
     unet = SingleEncoderPlainUNet(
+        layer_args                = layer_args,
         input_channels            = args.input_channels,
         num_classes               = args.num_classes,
         num_downsample            = args.num_downsample,
         num_blocks_per_stage      = args.blocks_per_stage,
-        layer_args                = layer_args,
         deep_supervision          = args.deep_supervision,
-        encoder_base_num_features = 32
+        encoder_base_num_features = 32,
     )
 
     return unet
 
 
-def select_model(args):
+def select_model(args) -> nn.Module:
     type2model = {
         'mencoder_plain_unet': get_multi_encoder_plain_unet(args),
         'sencoder_plain_unet': get_single_encoder_plain_unet(args),
-        # 'mencoder_res_unet' : None,
-        # 'mencoder_dense_unet' : None,
-        # 'mencoder_att_unet' : None,
+        # 'mencoder_res_unet'  : None,
+        # 'mencoder_dense_unet': None,
+        # 'mencoder_att_unet'  : None,
+        # 'm3former'           : None,
     }
     model = type2model[args.model_type]
     return model

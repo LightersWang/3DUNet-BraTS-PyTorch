@@ -1,6 +1,3 @@
-import sys
-sys.path.append("/home/whr/Code/multi_modal_al/seg/")
-
 import os
 from os import listdir
 from os.path import join

@@ -24,7 +24,7 @@ from scheduler import get_scheduler
 from utils import AverageMeter, CaseSegMetricMeter, load_cases_split, save_nifti
 
 
-def train(args, epoch, model, train_loader, loss, optimizer):
+def train(args, epoch, model, train_loader, loss, optimizer, scheduler):
     # switch to train mode
     model.train()
 
@@ -67,7 +67,7 @@ def train(args, epoch, model, train_loader, loss, optimizer):
 
         # prevent gradient explosion
         nn.utils.clip_grad_value_(model.parameters(), 40)
-        optimizer.step()
+        optimizer.step() 
 
         # logging losses
         bce_loss_meter.update(bce_loss.item(), bsz)
@@ -87,6 +87,8 @@ def train(args, epoch, model, train_loader, loss, optimizer):
                 f'total_loss {total_loss_meter.val:.3f} ({total_loss_meter.avg:.3f}) \t')
 
         end = time.time()
+
+    scheduler.step()
 
     return {
         'bce_loss': bce_loss_meter.avg, 
@@ -175,8 +177,9 @@ def val(args, epoch, model:nn.Module, val_loader, save_epoch_path:str):
 
 def main():
     args = prepare_train_args()
-    torch.manual_seed(args.seed)
     tb_logger = SummaryWriter(args.save_path)
+    torch.manual_seed(args.seed)
+    cudnn.benchmark = True
 
     # dataloader
     train_cases, val_cases = load_cases_split(args.cases_split)
@@ -184,27 +187,23 @@ def main():
     val_loader = get_brats2021_val_loader(args, val_cases)
 
     # model & stuff
-    model = select_model(args)
-    model = torch.nn.DataParallel(model, device_ids=args.gpus)
-    loss = SoftDiceBCEWithLogitsLoss()
+    model = select_model(args).cuda()
+    loss = SoftDiceBCEWithLogitsLoss().cuda()
     optimizer = get_optimizer(args, model)
     scheduler = get_scheduler(args, optimizer)
-    if torch.cuda.is_available():
-        model = model.cuda()
-        loss = loss.cuda()
-        cudnn.benchmark = True
 
     # auto mixed precision
     if args.amp:
-        # amp.register_float_function(torch, 'sigmoid')
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=args.opt_level)
+        amp.register_float_function(torch, 'sigmoid')
+        model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
+
+    model = torch.nn.DataParallel(model, device_ids=args.gpus)
 
     # load model & resume training
     if args.load_model_path != '':
-        print(f"=> loading checkpoint ...")
+        print(f"==> loading checkpoint ...")
         state = torch.load(args.load_model_path)
-        epoch = state['epoch'] + 1
+        sratr_epoch = state['epoch'] + 1
         model.load_state_dict(state['model'])
         optimizer.load_state_dict(state['optimizer'])
         scheduler.load_state_dict(state['scheduler'])
@@ -212,25 +211,25 @@ def main():
             print('=> resuming amp state_dict')
             amp.load_state_dict(state['amp'])
         
-        print(f"=> loaded checkpoint from epoch {state['epoch']}")
+        print(f"==> loaded checkpoint from epoch {state['epoch']}")
         del state
         torch.cuda.empty_cache()
+    else:
+        sratr_epoch = 0
 
     # train & val
-    for epoch in range(args.epochs):
+    for epoch in range(sratr_epoch, args.epochs):
         print("==> training...")
-        train_tb = train(args, epoch, model, train_loader, loss, optimizer)
+        train_tb = train(args, epoch, model, train_loader, loss, optimizer, scheduler)
 
         for key in train_tb.keys():
             tb_logger.add_scalar(key, train_tb[key], epoch)
-
-        scheduler.step()
         
         if ((epoch + 1) % args.val_save_freq == 0) or (epoch == 1):
             print("==> testing...")
 
             # make save epoch folder
-            save_epoch_path = join(args.save_path, f"epoch_{epoch}")
+            save_epoch_path = join(args.save_path, f"epoch_{epoch:02d}")
             if not os.path.exists(save_epoch_path):
                 os.system(f"mkdir -p {save_epoch_path}")
 

@@ -1,6 +1,3 @@
-import sys
-sys.path.append("/home/whr/Code/multi_modal_al/seg/")
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

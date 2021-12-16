@@ -103,19 +103,20 @@ def load_checkpoint_args(args):
     load_path = args.load_path      # old args load path is empty or out-of-date, so save it for now
     ckp_args_path = os.path.join(os.path.dirname(load_path), 'args.pickle')
     with open(ckp_args_path, 'rb') as f:
-        loaded_args = f.load(f)
+        loaded_args = pickle.load(f)
 
-    args = deepcopy(loaded_args)
-    args.load_path = load_path
-    args.load_checkpoint = True
-    epoch = int(args.load_path.split("_")[-1])
-    args.load_model_path = os.path.join(args.load_path, f"checkpoint_{epoch:02d}.pth")
+    loaded_args.load_path = load_path
+    loaded_args.load_checkpoint = True
+    epoch = int(loaded_args.load_path.split("_")[-1])
+    loaded_args.load_model_path = os.path.join(loaded_args.load_path, f"checkpoint_{epoch:02d}.pth")
+
+    return loaded_args
 
 
 def prepare_train_args():
     args = parse_args()
     if args.load_path != '':
-        load_checkpoint_args(args)
+        args = load_checkpoint_args(args)
     else:
         get_save_path(args)
         save_args(args)

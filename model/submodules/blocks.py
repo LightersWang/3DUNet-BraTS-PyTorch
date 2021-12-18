@@ -17,6 +17,24 @@ class Identity(nn.Module):
         return input
 
 
+class Normalize(nn.Module):
+
+    def __init__(self, p=2, dim=1):
+        super(Normalize, self).__init__()
+        self.p = p
+        self.dim = dim
+
+    def forward(self, x):
+        return F.normalize(x, p=self.p, dim=self.dim)
+
+
+class Flatten(nn.Module):
+
+    def forward(self, x):
+        B = x.shape[0]
+        return x.view(B, -1)
+
+
 class ConvDropoutNormLeakyReLU(nn.Module):
 
     def __init__(self, input_channels, output_channels, stride=1, kernel_size=3, conv_bias=True, 

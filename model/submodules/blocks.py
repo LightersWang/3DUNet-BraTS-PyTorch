@@ -70,7 +70,7 @@ class Upsample(nn.Module):
 
 if __name__ == "__main__":
     # test conv layers
-    conv_layers = StackedConvLayers(2, input_channels=3, output_channels=32, kernel_size=3, dropout_prob=None, first_stride=2, transpose=True)
+    conv_layers = StackedConvLayers(2, input_channels=3, output_channels=32, kernel_size=3, dropout_prob=None, first_stride=2)
     print(conv_layers)
 
     # # test F.interpolate

@@ -11,8 +11,8 @@ class PlainUNetEncoder(nn.Module):
         base_num_features = 8 (Single Modality)
         base_num_features = 32 (Multi Modality)
     """
-    def __init__(self, input_channels, num_downsample, num_blocks_per_stage, layer_args, base_num_features=8, 
-                 featmap_mul_downsample=2):
+    def __init__(self, input_channels, num_downsample, num_blocks_per_stage, 
+                 base_num_features=8, featmap_mul_downsample=2, **layer_args):
         super(PlainUNetEncoder, self).__init__()
 
         self.num_blocks_per_stage = num_blocks_per_stage
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     # multi modal encoder test
     multi_modal_encoder = PlainUNetEncoder(
         input_channels=4, num_downsample=5, num_blocks_per_stage=2, 
-        layer_args=layer_args, base_num_features=32, featmap_mul_downsample=2)
+        base_num_features=32, featmap_mul_downsample=2, **layer_args)
     print(multi_modal_encoder.stages)
     print(multi_modal_encoder.input_fearures)
     print(multi_modal_encoder.output_fearures)

@@ -11,7 +11,7 @@ class MultiEncoderUNetDecoder(nn.Module):
     """
 
     def __init__(self, num_encoder, single_modal_encoder:PlainUNetEncoder,
-                 num_classes, layer_args, deep_supervision=True):
+                 num_classes, deep_supervision=True, **layer_args):
         super(MultiEncoderUNetDecoder, self).__init__()
         
         # assume all encoders have same architecture, so one encoder is enough
@@ -133,11 +133,11 @@ if __name__ == "__main__":
     # print(decoder)
 
     # multi decoder forward test
-    encoder_t1    = PlainUNetEncoder(1, 5, 2, layer_args, base_num_features=8, featmap_mul_downsample=2)
-    encoder_t1ce  = PlainUNetEncoder(1, 5, 2, layer_args, base_num_features=8, featmap_mul_downsample=2)
-    encoder_t2    = PlainUNetEncoder(1, 5, 2, layer_args, base_num_features=8, featmap_mul_downsample=2)
-    encoder_flair = PlainUNetEncoder(1, 5, 2, layer_args, base_num_features=8, featmap_mul_downsample=2)
-    decoder       = MultiEncoderUNetDecoder(4, encoder_t1, 3, layer_args, deep_supervision=True)
+    encoder_t1    = PlainUNetEncoder(1, 5, 2, base_num_features=8, featmap_mul_downsample=2, **layer_args)
+    encoder_t1ce  = PlainUNetEncoder(1, 5, 2, base_num_features=8, featmap_mul_downsample=2, **layer_args)
+    encoder_t2    = PlainUNetEncoder(1, 5, 2, base_num_features=8, featmap_mul_downsample=2, **layer_args)
+    encoder_flair = PlainUNetEncoder(1, 5, 2, base_num_features=8, featmap_mul_downsample=2, **layer_args)
+    decoder       = MultiEncoderUNetDecoder(4, encoder_t1, 3, deep_supervision=True, **layer_args)
 
     x = torch.rand(1, 1, 128, 128, 128)
     multi_encoder_skips = []

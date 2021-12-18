@@ -7,7 +7,7 @@ from model.submodules.single_encoder_unet_decoder import SingleEncoderUNetDecode
 
 class SingleEncoderPlainUNet(nn.Module):
     def __init__(self, input_channels, num_classes, num_downsample, num_blocks_per_stage, 
-                 layer_args, deep_supervision=True, encoder_base_num_features=32, featmap_mul_downsample=2):
+                 deep_supervision=True, encoder_base_num_features=32, featmap_mul_downsample=2, **layer_args):
         super(SingleEncoderPlainUNet, self).__init__()
         
         self.num_classes = num_classes
@@ -20,17 +20,17 @@ class SingleEncoderPlainUNet(nn.Module):
             input_channels=input_channels,
             num_downsample=self.num_downsample,
             num_blocks_per_stage=self.num_blocks_per_stage,
-            layer_args=layer_args,
             base_num_features=encoder_base_num_features,
-            featmap_mul_downsample=featmap_mul_downsample
+            featmap_mul_downsample=featmap_mul_downsample,
+            **layer_args
         )
 
         # decoder
         self.decoder = SingleEncoderUNetDecoder(
             single_modal_encoder=self.encoder,
             num_classes=self.num_classes,
-            layer_args=layer_args,
-            deep_supervision=deep_supervision
+            deep_supervision=deep_supervision,
+            **layer_args
         )
 
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     }
 
     x_patch = torch.rand(2, 4, 128, 128, 128).cuda()
-    unet = SingleEncoderPlainUNet(4, 3, 5, 2, layer_args, deep_supervision=True, encoder_base_num_features=32).cuda()
+    unet = SingleEncoderPlainUNet(4, 3, 5, 2, deep_supervision=True, encoder_base_num_features=32, **layer_args).cuda()
     unet = nn.DataParallel(unet, device_ids=[0, 1])
     outputs = unet(x_patch)
     print("========================================================")
@@ -73,4 +73,4 @@ if __name__ == "__main__":
             inputs=x_real, roi_size=128, sw_batch_size=x_real.shape[0], overlap=0.5,
             predictor=unet_eval
         )
-        print(len(x_infer), len(x_infer[0]), len(x_infer[1]))
+        print(len(x_infer))

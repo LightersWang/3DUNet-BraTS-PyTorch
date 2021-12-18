@@ -11,7 +11,7 @@ class SingleEncoderUNetDecoder(nn.Module):
     """
 
     def __init__(self, single_modal_encoder:PlainUNetEncoder,
-                 num_classes, layer_args, deep_supervision=True):
+                 num_classes, deep_supervision=True, **layer_args):
         super(SingleEncoderUNetDecoder, self).__init__()
 
         # assume all encoders have same architecture, so one encoder is enough
@@ -114,8 +114,8 @@ if __name__ == "__main__":
     }
 
     # single decoder forward test
-    encoder = PlainUNetEncoder(4, 5, 2, layer_args, base_num_features=32, featmap_mul_downsample=2)
-    decoder = SingleEncoderUNetDecoder(encoder, 3, layer_args, deep_supervision=True)
+    encoder = PlainUNetEncoder(4, 5, 2, base_num_features=32, featmap_mul_downsample=2, **layer_args)
+    decoder = SingleEncoderUNetDecoder(encoder, 3, deep_supervision=True, **layer_args)
     
     x = torch.rand(1, 4, 128, 128, 128)
     # single_encoder_skips = encoder(x)

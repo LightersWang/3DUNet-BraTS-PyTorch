@@ -9,34 +9,6 @@ from dataset.dataset_utils import nib_load
 from dataset.augment import get_brats2021_train_transform, get_brats2021_val_transform
 
 
-def process_f32(img_dir):
-    """ Set all Voxels that are outside of the brain mask to 0"""
-    modalities = ['t2', 't1ce', 'flair', 't1']
-    name = os.path.basename(img_dir)
-    images = np.stack([
-        np.array(nib_load(join(img_dir, name) + '_' + i + '.nii.gz'),
-                 dtype='float32', order='C') for i in modalities], -1)  # [240, 240, 155, 4]
-    mask = images.sum(-1) > 0       # [240, 240, 155]
-
-    for k in range(len(modalities)):
-        x = images[..., k]
-        y = x[mask]  # get brain mask
-
-        lower = np.percentile(y, 0.2)
-        upper = np.percentile(y, 99.8)
-
-        x[mask & (x < lower)] = lower
-        x[mask & (x > upper)] = upper
-
-        y = x[mask]
-        x -= y.mean()
-        x /= y.std()
-
-        images[..., k] = x
-
-    return images
-
-
 class BraTS2021Dataset(data.Dataset):
     def __init__(self, data_root:str, split:str='train', case_names:list=[], transforms=None):
         super(BraTS2021Dataset, self).__init__()

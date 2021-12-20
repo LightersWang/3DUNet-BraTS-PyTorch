@@ -14,14 +14,14 @@ try:
 except ImportError:
     pass
 
-import metrics
-from dataset.brats2021 import get_brats2021_train_loader, get_brats2021_val_loader
-from loss import SoftDiceBCEWithLogitsLoss
+import utils.metrics as metrics
 from model.model_entry import DeepSupervisionUNetEval, select_model
-from optim import get_optimizer
-from options import prepare_train_args
-from scheduler import get_scheduler
-from utils import AverageMeter, CaseSegMetricMeter, load_cases_split, save_nifti
+from dataset.brats2021 import get_brats2021_train_loader, get_brats2021_val_loader
+from utils.loss import SoftDiceBCEWithLogitsLoss
+from utils.optim import get_optimizer
+from utils.options import prepare_train_args
+from utils.scheduler import get_scheduler
+from utils.misc import AverageMeter, CaseSegMetricMeter, load_cases_split, save_nifti
 
 
 def train(args, epoch, model, train_loader, loss, optimizer, scheduler):

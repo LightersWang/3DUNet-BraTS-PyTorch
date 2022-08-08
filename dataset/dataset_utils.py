@@ -2,8 +2,27 @@ import os
 import numpy as np
 import nibabel as nib
 
-from os import listdir
 from os.path import join
+from monai.transforms.transform import MapTransform
+
+ 
+class RobustZScoreNormalization(MapTransform):
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.key_iterator(d):
+            mask = d[key] > 0
+
+            lower = np.percentile(d[key][mask], 0.2)
+            upper = np.percentile(d[key][mask], 99.8)
+
+            d[key][mask & (d[key] < lower)] = lower
+            d[key][mask & (d[key] > upper)] = upper
+
+            y = d[key][mask]
+            d[key] -= y.mean()
+            d[key] /= y.std()
+
+        return d
 
 
 def process_f32(img_dir):

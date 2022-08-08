@@ -1,94 +1,96 @@
 import os
-from os.path import join
 import time
+from os.path import join
+from copy import deepcopy
+
+import warnings
+warnings.filterwarnings("ignore")
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.backends.cudnn as cudnn
-from monai.inferers import sliding_window_inference
+from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
+from monai.inferers import sliding_window_inference
 
-try:
-    from apex import amp, optimizers
-except ImportError:
-    pass
-
+import utils.misc as utils
 import utils.metrics as metrics
-from model.model_entry import DeepSupervisionUNetEval, select_model
-from dataset.brats2021 import get_brats2021_train_loader, get_brats2021_val_loader
-from utils.loss import SoftDiceBCEWithLogitsLoss
+from dataset import brats2021
+from configs import parse_seg_args
+from models import get_unet
 from utils.optim import get_optimizer
-from utils.options import prepare_train_args
 from utils.scheduler import get_scheduler
-from utils.misc import AverageMeter, CaseSegMetricMeter, load_cases_split, save_nifti
+from utils.loss import SoftDiceBCEWithLogitsLoss
 
 
-def train(args, epoch, model, train_loader, loss, optimizer, scheduler):
-    # switch to train mode
+def train(args, epoch, model:nn.Module, train_loader, loss_fn, optimizer, scheduler, scaler):
     model.train()
 
-    data_time = AverageMeter()
-    batch_time = AverageMeter()
-    bce_loss_meter = AverageMeter()
-    dsc_loss_meter = AverageMeter()
-    total_loss_meter = AverageMeter()
+    data_time = utils.AverageMeter('Data', ':6.3f')
+    batch_time = utils.AverageMeter('Time', ':6.3f')
+    bce_loss_meter = utils.AverageMeter('BCE', ':.4f')
+    dsc_loss_meter = utils.AverageMeter('Dice', ':.4f')
+    total_loss_meter = utils.AverageMeter('Loss', ':.4f')
+    progress = utils.ProgressMeter(
+        len(train_loader), 
+        [batch_time, data_time, bce_loss_meter, dsc_loss_meter, total_loss_meter],
+        prefix=f"Train: [{epoch}]")
 
     end = time.time()
-    for iter, (image, label, _, _) in enumerate(train_loader):
+    for i, (image, label, _, _) in enumerate(train_loader):
         # init
-        bce_loss = torch.tensor(0.).cuda()
-        dsc_loss = torch.tensor(0.).cuda()
+        bce_loss = torch.tensor(0.0, requires_grad=True).cuda()
+        dsc_loss = torch.tensor(0.0, requires_grad=True).cuda()
         image, label = image.cuda(), label.float().cuda()
         bsz = image.size(0)
-        data_time.update(time.time() - end) 
+        data_time.update(time.time() - end)
 
-        # forward
-        pred = model(image)
+        with autocast((args.amp) and (scaler is not None)):
+            # forward
+            preds = model(image)
 
-        # calc loss weighting factor, work for both w/ or w/o deep supervision
-        weights = np.array([1 / (2 ** j) for j in range(len(pred))])
-        weights /= weights.sum()
+            # calc loss weighting factor, works for both w/ or w/o deep supervision
+            weights = np.array([1 / (2 ** j) for j in range(len(preds))])
+            weights /= weights.sum()
 
-        # calc losses
-        for j in range(len(pred)):
-            bce, dsc = loss(pred[j], label)
-            bce_loss += weights[j] * bce
-            dsc_loss += weights[j] * dsc
-        total_loss = bce_loss + dsc_loss
+            # calc losses
+            for j in range(len(preds)):
+                bce, dsc = loss_fn(preds[j], label)
+                bce_loss += weights[j] * bce
+                dsc_loss += weights[j] * dsc
+            total_loss = bce_loss + dsc_loss
 
-        # compute gradient and do Adam step
+        # compute gradient and do optimizer step
         optimizer.zero_grad()
-        if args.amp:
-            with amp.scale_loss(total_loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
+        if args.amp and scaler is not None:
+            scaler.scale(total_loss).backward()
+            if args.clip_grad:
+                scaler.unscale_(optimizer)  # enable grad clipping
+                nn.utils.clip_grad_value_(model.parameters(), 40)
+            # FIXME 'No inf checks were recorded for this optimizer' when using half precision
+            scaler.step(optimizer)
+            scaler.update()
         else:
             total_loss.backward()
+            if args.clip_grad:
+                nn.utils.clip_grad_value_(model.parameters(), 40)
+            optimizer.step()
 
-        # prevent gradient explosion
-        nn.utils.clip_grad_value_(model.parameters(), 40)
-        optimizer.step() 
-
-        # logging losses
+        # logging
+        torch.cuda.synchronize()
         bce_loss_meter.update(bce_loss.item(), bsz)
         dsc_loss_meter.update(dsc_loss.item(), bsz)
         total_loss_meter.update(total_loss.item(), bsz)
-
-        torch.cuda.synchronize()
         batch_time.update(time.time() - end)
 
         # monitor training progress
-        if iter % args.print_freq == 0:
-            print(f'Train: [{epoch}][{iter + 1}/{len(train_loader)}]\t'
-                f'BT {batch_time.val:.3f} ({batch_time.avg:.3f}) \t'
-                f'DT {data_time.val:.3f} ({data_time.avg:.3f}) \t'
-                f'bce_loss {bce_loss_meter.val:.3f} ({bce_loss_meter.avg:.3f}) \t'
-                f'dsc_loss {dsc_loss_meter.val:.3f} ({dsc_loss_meter.avg:.3f}) \t'
-                f'total_loss {total_loss_meter.val:.3f} ({total_loss_meter.avg:.3f}) \t')
+        if (i == 0) or (i + 1) % args.print_freq == 0:
+            progress.display(i+1)
 
         end = time.time()
 
-    scheduler.step()
+    if scheduler is not None:
+        scheduler.step()
 
     return {
         'bce_loss': bce_loss_meter.avg, 
@@ -98,159 +100,144 @@ def train(args, epoch, model, train_loader, loss, optimizer, scheduler):
     }
 
 
-def val(args, epoch, model:nn.Module, val_loader, save_epoch_path:str):
+def infer(args, epoch, model:nn.Module, infer_loader, mode:str, save_pred:bool=False):
     model.eval()
 
-    batch_time = AverageMeter()
-    wt_dice_meter = AverageMeter()
-    tc_dice_meter = AverageMeter()
-    et_dice_meter = AverageMeter()
-    wt_hd95_meter = AverageMeter()
-    tc_hd95_meter = AverageMeter()
-    et_hd95_meter = AverageMeter()
-    case_metric_meter = CaseSegMetricMeter()
+    data_time = utils.AverageMeter('Data', ':6.3f')
+    batch_time = utils.AverageMeter('Time', ':6.3f')
+    case_metrics_meter = utils.CaseSegMetricsMeterBraTS()
+    
+    # make save epoch folder
+    folder_dir = f"{mode}" if epoch is None else f"{mode}_epoch_{epoch:02d}"
+    save_path = join(args.save_dir, folder_dir)
+    if not os.path.exists(save_path):
+        os.system(f"mkdir -p {save_path}")
 
     with torch.no_grad():
         end = time.time()
-        for iter, (image, label, _, brats_names) in enumerate(val_loader):
-            image, label = image.cuda(), label.float().cuda()
+        for i, (image, label, _, brats_names) in enumerate(infer_loader):
+            # measure data loading time
+            data_time.update(time.time() - end)
+
+            image, label = image.cuda(), label.bool().cuda()
             bsz = image.size(0)
 
             # get seg map
-            model_eval = DeepSupervisionUNetEval(model)     # wrapper for infer
             seg_map = sliding_window_inference(
                 inputs=image, 
+                predictor=model,
                 roi_size=args.patch_size,
-                sw_batch_size=1,
-                predictor=model_eval,
+                sw_batch_size=args.sw_batch_size,
                 overlap=args.patch_overlap,
                 mode=args.sliding_window_mode
             )
 
             # discrete
-            seg_map = torch.where(seg_map > 0.5, 1.0, 0.0)
+            seg_map = torch.where(seg_map > 0.5, True, False)
+
+            # post-processing
+            seg_map = utils.brats_post_processing(seg_map)
 
             # calc metric 
             dice = metrics.dice(seg_map, label)
             hd95 = metrics.hd95(seg_map, label)
 
             # output seg map
-            save_nifti(seg_map, brats_names, save_epoch_path, args)
+            if save_pred:
+                utils.save_brats_nifti(seg_map, brats_names, mode, args.data_root, save_path)
 
             # logging
-            wt_dice_meter.update(dice[:, 1].mean(), bsz)
-            tc_dice_meter.update(dice[:, 0].mean(), bsz)
-            et_dice_meter.update(dice[:, 2].mean(), bsz)
-            wt_hd95_meter.update(hd95[:, 1].mean(), bsz)
-            tc_hd95_meter.update(hd95[:, 0].mean(), bsz)
-            et_hd95_meter.update(hd95[:, 2].mean(), bsz)
-            case_metric_meter.update(dice, hd95, brats_names, bsz)
-
             torch.cuda.synchronize()
             batch_time.update(time.time() - end)
+            case_metrics_meter.update(dice, hd95, brats_names, bsz)
 
             # monitor training progress
-            if iter % args.print_freq == 0:
-                print(f'Val: [{iter + 1}/{len(val_loader)}]\t'
-                    f'BT {batch_time.val:.3f} ({batch_time.avg:.3f}) \t'
-                    f'Dice_WT {wt_dice_meter.val:.3f} ({wt_dice_meter.avg:.3f}) \t'
-                    f'Dice_TC {tc_dice_meter.val:.3f} ({tc_dice_meter.avg:.3f}) \t'
-                    f'Dice_ET {et_dice_meter.val:.3f} ({et_dice_meter.avg:.3f}) \t'
-                    f'HD95_WT {wt_hd95_meter.val:.3f} ({wt_hd95_meter.avg:.3f}) \t'
-                    f'HD95_TC {tc_hd95_meter.val:.3f} ({tc_hd95_meter.avg:.3f}) \t'
-                    f'HD95_ET {et_hd95_meter.val:.3f} ({et_hd95_meter.avg:.3f}) \t')
+            if (i == 0) or (i + 1) % args.print_freq == 0:
+                mean_metrics = case_metrics_meter.mean()
+                print("\t".join([
+                    f'{mode.capitalize()}: [{epoch}][{i+1}/{len(infer_loader)}]',
+                    str(batch_time), str(data_time),
+                    f"Dice_WT {dice[:, 1].mean():.3f} ({mean_metrics['Dice_WT']:.3f})",
+                    f"Dice_TC {dice[:, 0].mean():.3f} ({mean_metrics['Dice_TC']:.3f})",
+                    f"Dice_ET {dice[:, 2].mean():.3f} ({mean_metrics['Dice_ET']:.3f})",
+                    f"HD95_WT {hd95[:, 1].mean():7.3f} ({mean_metrics['HD95_WT']:7.3f})",
+                    f"HD95_TC {hd95[:, 0].mean():7.3f} ({mean_metrics['HD95_TC']:7.3f})",
+                    f"HD95_ET {hd95[:, 2].mean():7.3f} ({mean_metrics['HD95_ET']:7.3f})",
+                ]))
 
             end = time.time()
-    
-    # output case metric csv
-    case_metric_meter.output(epoch, save_epoch_path)
 
-    return {
-        "Dice_WT": wt_dice_meter.avg,
-        "Dice_TC": tc_dice_meter.avg,
-        "Dice_ET": et_dice_meter.avg,
-        "HD95_WT": wt_hd95_meter.avg,
-        "HD95_TC": tc_hd95_meter.avg,
-        "HD95_ET": et_hd95_meter.avg,
-    }
+        # output case metric csv
+        case_metrics_meter.output(save_path)
+
+    return case_metrics_meter.mean()
 
 
 def main():
-    args = prepare_train_args()
-    tb_logger = SummaryWriter(args.save_path)
-    torch.manual_seed(args.seed)
-    cudnn.benchmark = True
+    args = parse_seg_args()
+    print("==>", args.comment)
+    tb_logger = SummaryWriter(args.save_dir)
+    utils.seed_everything(args.seed)
+    torch.backends.cudnn.benchmark = True
 
-    # dataloader
-    train_cases, val_cases = load_cases_split(args.cases_split)
-    train_loader = get_brats2021_train_loader(args, train_cases)
-    val_loader = get_brats2021_val_loader(args, val_cases)
+    # dataloaders
+    train_cases, val_cases, test_cases = utils.load_cases_split(args.cases_split)
+    train_loader = brats2021.get_train_loader(args, train_cases)
+    val_loader   = brats2021.get_infer_loader(args, val_cases)
+    test_loader  = brats2021.get_infer_loader(args, test_cases)
 
     # model & stuff
-    model = select_model(args).cuda()
-    loss = SoftDiceBCEWithLogitsLoss().cuda()
+    model = get_unet(args).cuda()
     optimizer = get_optimizer(args, model)
     scheduler = get_scheduler(args, optimizer)
-
-    # auto mixed precision
-    if args.amp:
-        amp.register_float_function(torch, 'sigmoid')
-        model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
-
-    model = torch.nn.DataParallel(model, device_ids=args.gpus)
-
-    # load model & resume training
-    if args.load_model_path != '':
-        print(f"==> loading checkpoint ...")
-        state = torch.load(args.load_model_path)
-        sratr_epoch = state['epoch'] + 1
-        model.load_state_dict(state['model'])
-        optimizer.load_state_dict(state['optimizer'])
-        scheduler.load_state_dict(state['scheduler'])
-        if args.amp and 'amp' in state:
-            print('=> resuming amp state_dict')
-            amp.load_state_dict(state['amp'])
-        
-        print(f"==> loaded checkpoint from epoch {state['epoch']}")
-        del state
-        torch.cuda.empty_cache()
-    else:
-        sratr_epoch = 0
+    loss = SoftDiceBCEWithLogitsLoss().cuda()
+    scaler = GradScaler() if args.amp else None # auto mixed precision
 
     # train & val
-    for epoch in range(sratr_epoch, args.epochs):
-        print("==> training...")
-        train_tb = train(args, epoch, model, train_loader, loss, optimizer, scheduler)
-
-        for key in train_tb.keys():
-            tb_logger.add_scalar(key, train_tb[key], epoch)
+    print("==> Training starts...")
+    best_model = {}
+    val_leaderboard = utils.LeaderboardBraTS()
+    for epoch in range(args.epochs):
+        train_tb = train(args, epoch, model, train_loader, loss, optimizer, scheduler, scaler)
+        for key, value in train_tb.items():
+            tb_logger.add_scalar("train/" + key, value, epoch)
         
-        if ((epoch + 1) % args.val_save_freq == 0) or (epoch == 1):
-            print("==> testing...")
-
-            # make save epoch folder
-            save_epoch_path = join(args.save_path, f"epoch_{epoch:02d}")
-            if not os.path.exists(save_epoch_path):
-                os.system(f"mkdir -p {save_epoch_path}")
-
-            # actual validation & tensorboard logging
-            val_tb = val(args, epoch, model, val_loader, save_epoch_path)
-            for key in val_tb.keys():
-                tb_logger.add_scalar(key, val_tb[key], epoch)
-
-            # saving model & metrics for every case
-            print("==> saving...")
-            state = {
-                'model': model.state_dict(), 
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
-                'epoch': epoch,
-            }
-            if args.amp:
-                state['amp'] = amp.state_dict()
-            torch.save(state, os.path.join(save_epoch_path, f'checkpoint_{epoch:02d}.pth'))
-
+        # validation
+        if ((epoch + 1) % args.eval_freq == 0):
+            print(f"\n==> Validation starts...")
+            # inference on validation set
+            val_metrics = infer(args, epoch, model, val_loader, mode='val')
+            for key, value in val_metrics.items():
+                tb_logger.add_scalar("val/" + key, value, epoch)
+            
+            # model selection
+            val_leaderboard.update(epoch, val_metrics)
+            best_model.update({epoch: deepcopy(model.state_dict())})                
+            print(f"==> Validation ends...\n")
+        
         torch.cuda.empty_cache()
+    
+    # ouput final leaderboard and its rank
+    val_leaderboard.output(args.save_dir)
+
+    # test
+    print("\n==> Testing starts...")
+    best_epoch = val_leaderboard.get_best_epoch()
+    best_model = best_model[best_epoch]
+    model.load_state_dict(best_model)
+    test_metrics = infer(
+        args, best_epoch, model, test_loader, mode='test', save_pred=args.save_pred)
+    for key, value in test_metrics.items():
+        tb_logger.add_scalar("test/" + key, value, best_epoch)
+
+    # save the best model on validation set
+    if args.save_model:
+        print("==> Saving...")
+        state = {'model': best_model, 'epoch': best_epoch, 'args':args}
+        torch.save(state, os.path.join(
+            args.save_dir, f"test_epoch_{best_epoch:02d}", f'best_ckpt.pth'))
+    
+    print("==> Testing ends...\n")
 
 
 if __name__ == '__main__':

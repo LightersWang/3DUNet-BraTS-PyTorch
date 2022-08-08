@@ -1,18 +1,18 @@
 import os
+import random
 from os.path import join
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
 import torch
+from torch import Tensor
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
-    def __init__(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
         self.reset()
 
     def reset(self):
@@ -27,44 +27,102 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
 
-class CaseSegMetricMeter(object):
+
+class ProgressMeter(object):
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        print('\t'.join(entries))
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
+
+class CaseSegMetricsMeterBraTS(object):
     """Stores segmentation metric (dice & hd95) for every case"""
+    cols = ['Dice_WT', 'Dice_TC', 'Dice_ET', 'HD95_WT', 'HD95_TC', 'HD95_ET']
+
     def __init__(self):
-        self.cases = {}
         self.reset()
 
     def reset(self):
-        self.cases = {}
+        self.cases = pd.DataFrame(columns=self.cols)
 
     def update(self, dice, hd95, names, bsz):
         for i in range(bsz):
-            self.cases.update({
-                names[i]: [dice[i, 1], dice[i, 0], dice[i, 2], 
-                           hd95[i, 1], hd95[i, 0], hd95[i, 2]]
-            })
+            self.cases.loc[names[i]] = [
+                dice[i, 1], dice[i, 0], dice[i, 2], 
+                hd95[i, 1], hd95[i, 0], hd95[i, 2],
+            ]
 
-    def output(self, epoch, save_epoch_path):
-        df = pd.DataFrame(self.cases).T
-        df.columns = ['Dice_WT', 'Dice_TC', 'Dice_ET',
-                      'HD95_WT', 'HD95_TC', 'HD95_ET']
-        df.to_csv(join(save_epoch_path, f"val_metric_epoch{epoch}.csv"))
+    def mean(self):
+        return self.cases.mean(0).to_dict()
+
+    def output(self, save_epoch_path):
+        # all cases csv
+        self.cases.to_csv(join(save_epoch_path, "case_metrics.csv"))
+        # summary txt
+        self.cases.mean(0).to_csv(join(save_epoch_path, "case_metrics_summary.txt"), sep='\t')
+
+
+class LeaderboardBraTS(object):
+    """Model selection using leaderboard. """
+    cols = ['Dice_WT', 'Dice_TC', 'Dice_ET', 'HD95_WT', 'HD95_TC', 'HD95_ET']
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.cases = pd.DataFrame(columns=self.cols)
+        self.case_rank = None
+
+    def update(self, epoch, metrics):
+        df = pd.DataFrame(data=metrics, index=[epoch])
+        self.cases = pd.concat([self.cases, df], axis=0)
+
+    def rank(self):
+        dice_rank = self.cases.iloc[:, :3].rank('index', method='min', ascending=False)
+        hd95_rank = self.cases.iloc[:, 3:].rank('index', method='min', ascending=True)
+        self.case_rank = pd.concat([dice_rank, hd95_rank], axis=1)
+    
+    def get_best_epoch(self):
+        self.rank()
+        return self.case_rank.mean(1).idxmin()
+    
+    def output(self, dir_path):
+        # only run once
+        self.rank()
+        self.cases.to_csv(join(dir_path, "final_leaderboard.csv"))
+        self.case_rank['Mean_Rank'] = self.case_rank.mean(1)
+        self.case_rank.to_csv(join(dir_path, "final_leaderboard_rank.csv"))
 
 
 def load_cases_split(split_path:str):
     df = pd.read_csv(split_path)
     cases_name, cases_split = np.array(df['name']), np.array(df['split'])
     train_cases = list(cases_name[cases_split == 'train'])
-    val_cases = list(cases_name[cases_split == 'val'])
+    val_cases   = list(cases_name[cases_split == 'val'])
+    test_cases  = list(cases_name[cases_split == 'test'])
 
-    return train_cases, val_cases
+    return train_cases, val_cases, test_cases
 
 
 def nib_affine(path):
     return nib.load(path).affine
 
 
-def save_nifti(seg_map:torch.Tensor, names:list, save_epoch_path:str, args):
+def save_brats_nifti(seg_map:Tensor, names:list, mode:str, data_root:str, save_epoch_path:str):
     """
     Output val seg map in every iteration to save VRAM
     """
@@ -72,7 +130,7 @@ def save_nifti(seg_map:torch.Tensor, names:list, save_epoch_path:str, args):
     B, _, H, W, D = seg_map_numpy.shape
 
     # make save folder
-    save_epoch_seg_path = join(save_epoch_path, f"val_seg_pred")
+    save_epoch_seg_path = join(save_epoch_path, f"{mode}_seg_pred")
     if not os.path.exists(save_epoch_seg_path):
         os.system(f"mkdir -p {save_epoch_seg_path}")
 
@@ -84,10 +142,31 @@ def save_nifti(seg_map:torch.Tensor, names:list, save_epoch_path:str, args):
         seg_img[np.where(output[0, ...] == 1)] = 1      # TC --> NCR
         seg_img[np.where(output[2, ...] == 1)] = 4      # ET --> ET
 
-        original_img_path = join(args.data_root, names[b], names[b]+f'_t1.nii.gz')      # random modality is ok
+        # random modality is ok
+        original_img_path = join(data_root, 'brats2021', names[b], names[b]+f'_t1.nii.gz')
         affine = nib_affine(original_img_path)
         
         nib.save(
             nib.Nifti1Image(seg_img, affine), 
             join(save_epoch_seg_path, names[b]+f'_pred.nii.gz')
         )
+
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def brats_post_processing(seg_map):
+    """ post-processing from brats 2021 1st solution:
+        Convert ET into NEC if #ET voxels < 200 (0-TC, 1-WT, 2-ET)
+    """
+    B, C = seg_map.shape[:2]
+    assert C == 3, f"BraTS only got 3 classes, but you got {C} classes."
+    for b in range(B):
+        if seg_map[b, 2].sum() < 200:   # ET voxels
+            seg_map[b, 2] = 0           # erase all ET voxels
+    return seg_map

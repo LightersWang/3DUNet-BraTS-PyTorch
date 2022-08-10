@@ -2,13 +2,14 @@ CUDA_VISIBLE_DEVICES=1 python train_brats2021.py \
     --comment train \
     --gpus 0 \
     --seed 1000 \
+    --amp \
     --num_workers 8 \
     --save_root exps \
     --dataset brats2021 \
     --cases_split data/split/brats2021_split_fold0.csv \
     --input_channels 4 \
     --epochs 100 \
-    --batch_size 1 \
+    --batch_size 2 \
     --lr 1e-3 \
     --optim adamw \
     --wd 1e-4 \

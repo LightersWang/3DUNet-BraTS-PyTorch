@@ -13,9 +13,9 @@ from dataset.dataset_utils import nib_load, RobustZScoreNormalization
 
 def get_brats2021_base_transform():
     base_transform = [
-        transforms.Orientationd(keys=['flair', 't1', 't1ce', 't2', 'label'], axcodes="RAS"),
         # [B, H, W, D] --> [B, C, H, W, D]
-        transforms.AddChanneld(keys=['flair', 't1', 't1ce', 't2', 'label']),        
+        transforms.AddChanneld(keys=['flair', 't1', 't1ce', 't2', 'label']),      
+        transforms.Orientationd(keys=['flair', 't1', 't1ce', 't2', 'label'], axcodes="RAS"),  
         RobustZScoreNormalization(keys=['flair', 't1', 't1ce', 't2']),
         transforms.ConcatItemsd(keys=['flair', 't1', 't1ce', 't2'], name='image', dim=0),
         transforms.DeleteItemsd(keys=['flair', 't1', 't1ce', 't2']),

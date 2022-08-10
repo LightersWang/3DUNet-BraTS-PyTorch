@@ -3,9 +3,6 @@ import time
 from os.path import join
 from copy import deepcopy
 
-import warnings
-warnings.filterwarnings("ignore")
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -50,7 +47,8 @@ def train(args, epoch, model:nn.Module, train_loader, loss_fn, optimizer, schedu
             preds = model(image)
 
             # calc loss weighting factor, works for both w/ or w/o deep supervision
-            weights = np.array([1 / (2 ** j) for j in range(len(preds))])
+            # weights as numpy array will make the compute graph empty when using amp
+            weights = torch.pow(0.5, torch.arange(len(preds)))
             weights /= weights.sum()
 
             # calc losses
@@ -66,14 +64,13 @@ def train(args, epoch, model:nn.Module, train_loader, loss_fn, optimizer, schedu
             scaler.scale(total_loss).backward()
             if args.clip_grad:
                 scaler.unscale_(optimizer)  # enable grad clipping
-                nn.utils.clip_grad_value_(model.parameters(), 40)
-            # FIXME 'No inf checks were recorded for this optimizer' when using half precision
+                nn.utils.clip_grad_norm_(model.parameters(), 20)
             scaler.step(optimizer)
             scaler.update()
         else:
             total_loss.backward()
             if args.clip_grad:
-                nn.utils.clip_grad_value_(model.parameters(), 40)
+                nn.utils.clip_grad_norm_(model.parameters(), 20)
             optimizer.step()
 
         # logging
@@ -133,6 +130,7 @@ def infer(args, epoch, model:nn.Module, infer_loader, mode:str, save_pred:bool=F
             )
 
             # discrete
+            seg_map = torch.sigmoid(seg_map)
             seg_map = torch.where(seg_map > 0.5, True, False)
 
             # post-processing

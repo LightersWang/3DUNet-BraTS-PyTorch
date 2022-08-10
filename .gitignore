@@ -9,3 +9,5 @@ data/brats21
 data/experiments
 *.vscode
 *.json
+exps
+data

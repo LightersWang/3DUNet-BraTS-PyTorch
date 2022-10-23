@@ -113,10 +113,6 @@ class SoftDiceBCEWithLogitsLoss(nn.Module):
         Seperately return BCEWithLogitsloss and Dice loss.
 
         BCEWithLogitsloss is more numerically stable than Sigmoid + BCE
-
-        Args:
-            bce_kwargs (dict): 
-            soft_dice_kwargs (dict):
         """
         super(SoftDiceBCEWithLogitsLoss, self).__init__()
 

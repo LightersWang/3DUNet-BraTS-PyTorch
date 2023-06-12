@@ -79,6 +79,7 @@ def get_tp_fp_fn_tn(net_output, gt, axes=None, mask=None, square=False):
 
 
 class SoftDiceWithLogitsLoss(nn.Module):
+    ''' Adapt from nnUNet repo'''
     def __init__(self, nonlinear='sigmoid', smooth=1.0):
         super(SoftDiceWithLogitsLoss, self).__init__()
         self.smooth = smooth

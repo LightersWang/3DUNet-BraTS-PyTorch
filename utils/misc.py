@@ -1,12 +1,16 @@
 import os
+import sys
 import random
+import logging
 from os.path import join
+from collections import OrderedDict
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
 import torch
 from torch import Tensor
+from torch.utils.tensorboard import SummaryWriter
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -38,10 +42,13 @@ class ProgressMeter(object):
         self.meters = meters
         self.prefix = prefix
 
-    def display(self, batch):
+    def display(self, batch, logger=None):
         entries = [self.prefix + self.batch_fmtstr.format(batch)]
         entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
+        if logger is None:
+            print('\t'.join(entries))
+        else:
+            logger.info('\t'.join(entries))
 
     def _get_batch_fmtstr(self, num_batches):
         num_digits = len(str(num_batches // 1))
@@ -159,13 +166,57 @@ def seed_everything(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+    torch.backends.cudnn.enable = True
+    torch.backends.cudnn.benchmark = True
+
+
+def initialize_logging(exp_dir):
+    # mkdir
+    log_fname = os.path.join(exp_dir, 'log.log')
+    LOGGING_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
+    DATE_FORMAT = '%Y%m%d %H:%M:%S'
+
+    logger = logging.getLogger("contrastive_pretrain")
+    logger.setLevel(logging.DEBUG)
+
+    if not logger.handlers:
+        formatter = logging.Formatter(fmt=LOGGING_FORMAT, datefmt=DATE_FORMAT)
+        ch = logging.StreamHandler(stream=sys.stdout)
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(formatter)
+
+        fh = logging.FileHandler(log_fname)
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+
+        logger.addHandler(ch)
+        logger.addHandler(fh)
+
+    return logger
+
+
+def initialization(args):
+    # set random seed
+    seed_everything(args.seed)
+
+    # make exp dir 
+    writer = SummaryWriter(args.exp_dir)
+
+    # init logger & save args
+    logger = initialize_logging(args.exp_dir)
+    logger.info(f"{'-'*20} New Experiment {'-'*20}")
+    logger.info(' '.join(sys.argv))
+    logger.info(args)
+
+    return logger, writer
+
 
 def brats_post_processing(seg_map):
-    """ post-processing from brats 2021 1st solution:
+    """ 
+        post-processing from brats 2021 1st solution:
         Convert ET into NEC if #ET voxels < 200 (0-TC, 1-WT, 2-ET)
     """
     B, C = seg_map.shape[:2]
-    assert C == 3, f"BraTS only got 3 classes, but you got {C} classes."
     for b in range(B):
         if seg_map[b, 2].sum() < 200:   # ET voxels
             seg_map[b, 2] = 0           # erase all ET voxels

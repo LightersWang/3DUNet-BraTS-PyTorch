@@ -1,5 +1,6 @@
 from .blocks import PlainBlock, ResidualBlock
 from .unet import UNet, MultiEncoderUNet
+from monai.networks.nets import UNETR
 
 
 block_dict = {
@@ -25,3 +26,14 @@ def get_unet(args):
         return UNet(**kwargs)
     elif args.unet_arch == 'multiencoder_unet':
         return MultiEncoderUNet(**kwargs)
+    elif args.unet_arch == 'unetr':
+        return UNETR(
+            spatial_dims=3,
+            in_channels=args.input_channels,
+            out_channels=args.num_classes,
+            img_size=(args.patch_size, args.patch_size, args.patch_size),
+            norm_name=args.norm,
+            dropout_rate=args.dropout_prob,
+        )
+    else:
+        raise NotImplementedError(args.unet_arch + " is not implemented.")

@@ -1,23 +1,6 @@
 import os
 import time
-import pickle
 from argparse import ArgumentParser
-
-
-def save_args(args):
-    # make save folder
-    if not os.path.exists(args.save_dir):
-        os.system('mkdir -p ' + args.save_dir)
-
-    args_path = os.path.join(args.save_dir, 'args')
-
-    # write as txt file
-    with open(args_path+'.txt', 'w') as f:
-        f.write("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
-
-    # write as pickle file
-    with open(args_path+'.pickle', 'wb') as f:
-        pickle.dump(args, f)
 
 
 def parse_seg_args():
@@ -29,15 +12,16 @@ def parse_seg_args():
     parser.add_argument('--seed', type=int, default=1000)
     parser.add_argument('--num_workers', type=int, default=6, help='number of workers to load data')
     parser.add_argument('--amp', action='store_true', help='using mixed precision')
+    parser.add_argument('--data_parallel', action='store_true', help='using data parallel')
 
     # path & dir
-    parser.add_argument('--save_root', type=str, default='exps', help='enter save root path')
-    parser.add_argument('--save_freq', type=int, default=10, help='save frequency for pretrain')
-    parser.add_argument('--print_freq', type=int, default=5, help='print frequency iteration')
+    parser.add_argument('--exp_dir', type=str, default='exps', help='experiment dir')
+    parser.add_argument('--save_freq', type=int, default=10, help='model save frequency (epoch)')
+    parser.add_argument('--print_freq', type=int, default=5, help='print frequency (iteration)')
 
     # data
     parser.add_argument('--dataset', type=str, default='brats2021', help='dataset hint', 
-        choices=['brats2021'])
+        choices=['brats2021', 'brats2018'])
     parser.add_argument('--data_root', type=str, default='data/', help='root dir of dataset')
     parser.add_argument('--cases_split', type=str, help='name & split')
     parser.add_argument('--input_channels', '--n_views', type=int, default=4, 
@@ -71,8 +55,8 @@ def parse_seg_args():
     parser.add_argument('--clip_grad', action='store_true', help='whether to clip gradient')
 
     # u-net
-    parser.add_argument('--unet_arch', type=str, default='multiencoder_unet', 
-        choices=['unet', 'multiencoder_unet'], help='Architecuture of the U-Net')
+    parser.add_argument('--unet_arch', type=str, default='unet', 
+        choices=['unet', 'multiencoder_unet', 'unetr'], help='Architecuture of the U-Net')
     parser.add_argument('--block', type=str, default='plain', choices=['plain', 'res'],
         help='Type of convolution block')
     parser.add_argument('--channels_list', nargs='+', type=int, default=[32, 64, 128, 256, 320, 320],
@@ -105,7 +89,7 @@ def parse_seg_args():
     args = parser.parse_args()
 
     # generate save path
-    save_dir_name = [
+    exp_dir_name = [
         args.comment, 
         args.dataset,
         args.unet_arch,
@@ -114,12 +98,8 @@ def parse_seg_args():
         f"pos{args.pos_ratio}",
         f"neg{args.neg_ratio}",
     ]
-    save_dir_name.append(time.strftime("%m%d_%H%M%S", time.localtime()))
-    save_dir_name = "_".join(save_dir_name)
-    
-    args.save_dir = os.path.join(args.save_root, save_dir_name)
-
-    # save args
-    save_args(args)
+    exp_dir_name.append(time.strftime("%m%d_%H%M%S", time.localtime()))
+    exp_dir_name = "_".join(exp_dir_name)
+    args.exp_dir += exp_dir_name
 
     return args

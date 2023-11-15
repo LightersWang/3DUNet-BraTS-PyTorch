@@ -18,8 +18,7 @@ from dataset import brats2021
 from models import get_unet
 from utils.loss import SoftDiceBCEWithLogitsLoss
 from utils.misc import (AverageMeter, CaseSegMetricsMeterBraTS, ProgressMeter, LeaderboardBraTS,
-                        brats_post_processing, initialization, load_pretrain_model,
-                        load_cases_split, save_brats_nifti)
+                        brats_post_processing, initialization, load_cases_split, save_brats_nifti)
 from utils.optim import get_optimizer
 from utils.scheduler import get_scheduler
 
@@ -193,7 +192,8 @@ def main():
     # load model
     if args.weight_path is not None:
         logger.info("==> Loading pretrain model...")
-        model_state = load_pretrain_model(model, args.weight_path)
+        assert args.weight_path.endswith(".pth")
+        model_state = torch.load(args.weight_path)['model']
         model.load_state_dict(model_state)
 
     # train & val
